@@ -1,0 +1,37 @@
+work_dir: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION
+sra_list: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/sra_list.txt
+
+quantification: "salmon" # salmon / star_htseq
+
+salmon:
+  transcripts: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/databases/salmon/index_hs38/gencode.v49.transcripts.fa
+  index_dir: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/databases/salmon/index_hs38/index_hs38
+  kmer: 31
+  threads: 10
+
+reference_star:
+  genome_fasta: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/databases/STAR/GRCh38/GRCh38.p14.genome.fa
+  gtf: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/databases/STAR/GRCh38/gencode.v49.chr_patch_hapl_scaff.annotation.gtf
+
+star:
+  index: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/databases/STAR/GRCh38/star_index
+  threads: 10
+  sjdbOverhang: 99
+
+htseq:
+  annot_dir: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/databases/STAR/GRCh38
+  threads: 1
+
+fastp_threads: 10
+kingfisher_threads: 10
+
+dge:
+  enabled: true                   
+  method: deseq2                  
+  metadata: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/meta_data.txt  
+  output_dir: dif_expression_results
+  
+   
+
+
+    
