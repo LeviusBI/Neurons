@@ -1,37 +1,54 @@
-work_dir: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION
-sra_list: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/sra_list.txt
+# RNA-seq Pipeline Configuration
+# All parameters are mandatory - no default values
 
-quantification: "salmon" # salmon / star_htseq
+# Base directory for all runs (timestamped subdirectories will be created here)
+base_work_dir: /path/to/your/base/work/directory
 
+# SRA ID list file (must contain 'accession' column)
+sra_list: /path/to/sra_list.txt
+
+# Quantification method
+quantification: salmon  # "salmon" or "star_htseq"
+
+# Salmon parameters
 salmon:
-  transcripts: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/databases/salmon/index_hs38/gencode.v49.transcripts.fa
-  index_dir: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/databases/salmon/index_hs38/index_hs38
+  transcripts: /path/to/gencode.v49.transcripts.fa
+  index_dir: /path/to/salmon/index
   kmer: 31
   threads: 10
 
+# STAR parameters
 reference_star:
-  genome_fasta: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/databases/STAR/GRCh38/GRCh38.p14.genome.fa
-  gtf: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/databases/STAR/GRCh38/gencode.v49.chr_patch_hapl_scaff.annotation.gtf
+  genome_fasta: /path/to/GRCh38.p14.genome.fa
+  gtf: /path/to/gencode.v49.annotation.gtf
 
 star:
-  index: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/databases/STAR/GRCh38/star_index
+  index: /path/to/star/index
   threads: 10
   sjdbOverhang: 99
+  star_bin: /path/to/STAR/bin/Linux_x86_64/STAR
 
+# HTSeq parameters
 htseq:
-  annot_dir: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/databases/STAR/GRCh38
   threads: 1
 
+# Resources
 fastp_threads: 10
 kingfisher_threads: 10
 
+# Differential Gene Expression (DGE)
 dge:
-  enabled: true                   
-  method: deseq2                  
-  metadata: /mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/meta_data.txt  
+  metadata: /path/to/meta_data.txt
   output_dir: dif_expression_results
-  
-   
 
+# Docker
+docker:
+  image: rna_seq_v1.0:latest
 
-    
+# Conda environments (paths to YAML files)
+conda_envs:
+  kingfisher: /path/to/snake-files/envs/kingfisher.yaml
+  fastp: /path/to/snake-files/envs/fastp.yaml
+  salmon: /path/to/snake-files/envs/salmon.yaml
+  star: /path/to/snake-files/envs/star.yaml
+  htseq: /path/to/snake-files/envs/htseq.yaml
