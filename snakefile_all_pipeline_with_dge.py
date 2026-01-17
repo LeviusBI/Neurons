@@ -128,6 +128,7 @@ samples.sort()
 METHOD = config["quantification"]
 
 # Select R script for DGE
+# R scripts are located in R-scripts/ directory
 if METHOD == "salmon":
     rna_script = "rna-seq-analisis_salmon.R"
 elif METHOD == "star_htseq":
@@ -151,7 +152,9 @@ elif METHOD == "star_htseq":
 rule all:
     input:
         up = os.path.join(work_dir, config["dge"]["output_dir"], f"upregulation_{METHOD}.txt"),
-        down = os.path.join(work_dir, config["dge"]["output_dir"], f"downregulation_{METHOD}.txt")
+        down = os.path.join(work_dir, config["dge"]["output_dir"], f"downregulation_{METHOD}.txt"),
+        pca_plot = os.path.join(work_dir, config["dge"]["output_dir"], f"PCA_plot_{METHOD}.png"),
+        pca_variance = os.path.join(work_dir, config["dge"]["output_dir"], f"PCA_variance_{METHOD}.png")
 
 # Download FASTQ files using kingfisher
 rule get_fastq:
@@ -340,21 +343,38 @@ rule dge:
         metadata = config["dge"]["metadata"]
     output:
         up = os.path.join(work_dir, config["dge"]["output_dir"], f"upregulation_{METHOD}.txt"),
-        down = os.path.join(work_dir, config["dge"]["output_dir"], f"downregulation_{METHOD}.txt")
+        down = os.path.join(work_dir, config["dge"]["output_dir"], f"downregulation_{METHOD}.txt"),
+        pca_plot = os.path.join(work_dir, config["dge"]["output_dir"], f"PCA_plot_{METHOD}.png"),
+        pca_variance = os.path.join(work_dir, config["dge"]["output_dir"], f"PCA_variance_{METHOD}.png")
     params:
         work_dir = work_dir,
-        gtf_file = config["reference_star"]["gtf"],
+        gtf_file = os.path.abspath(config["reference_star"]["gtf"]),
+        metadata_file = os.path.abspath(config["dge"]["metadata"]),
         docker_image = config["docker"]["image"],
-        # R script is located in the container
-        r_script_path = os.path.join("/home/scripts", rna_script)
+        # R scripts directory - mounted from host
+        r_scripts_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "R-scripts")),
+        r_script_name = rna_script,
+        r_script_container = os.path.join("/home/R-scripts", rna_script)
     shell:
         """
-        # Mount work directory, GTF file and metadata directory
+        # Ensure all paths are absolute for Docker mounting
+        WORK_DIR=$(readlink -f {params.work_dir})
+        GTF_FILE=$(readlink -f {params.gtf_file})
+        METADATA_FILE=$(readlink -f {params.metadata_file})
+        METADATA_DIR=$(dirname "$METADATA_FILE")
+        
+        # Mount work directory, GTF file, metadata directory, and R scripts
+        # Pass parameters via environment variables
+        R_SCRIPTS_DIR={params.r_scripts_dir}
         docker run --rm \
-            -v {params.work_dir}:{params.work_dir} \
-            -v {params.gtf_file}:{params.gtf_file} \
-            -v $(dirname {input.metadata}):$(dirname {input.metadata}) \
-            -w {params.work_dir} \
+            -v "$WORK_DIR":"$WORK_DIR" \
+            -v "$GTF_FILE":"$GTF_FILE" \
+            -v "$METADATA_DIR":"$METADATA_DIR" \
+            -v "$R_SCRIPTS_DIR":/home/R-scripts \
+            -w "$WORK_DIR" \
+            -e WORK_DIR="$WORK_DIR" \
+            -e GTF_FILE="$GTF_FILE" \
+            -e METADATA_FILE="$METADATA_FILE" \
             {params.docker_image} \
-            /usr/bin/Rscript {params.r_script_path}
+            /usr/bin/Rscript {params.r_script_container}
         """

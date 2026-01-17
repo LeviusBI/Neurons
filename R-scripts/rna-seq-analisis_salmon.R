@@ -10,19 +10,29 @@ library(UpSetR)
 library(dplyr)
 library(stringr)
 
-DATA_DIR <- "/mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION"
+# Get parameters from Snakemake or environment variables
+if (exists("snakemake")) {
+  # Running from Snakemake directly
+  work_dir <- snakemake@params[["work_dir"]]
+  gtf_file <- snakemake@params[["gtf_file"]]
+  metadata_file <- snakemake@params[["metadata_file"]]
+} else {
+  # Running from Docker container (via environment variables)
+  work_dir <- Sys.getenv("WORK_DIR")
+  gtf_file <- Sys.getenv("GTF_FILE")
+  metadata_file <- Sys.getenv("METADATA_FILE")
+}
 
-meta_data <- read.csv(file.path(DATA_DIR, "meta_data.txt"), sep = "\t", header = TRUE)
+# Read metadata
+meta_data <- read.csv(metadata_file, sep = "\t", header = TRUE)
 
 rownames(meta_data) <- meta_data$sampleid
 
 meta_data$individual <- as.factor(meta_data$individual)
 meta_data$diff_time <- as.factor(meta_data$diff_time)
 
-
-Annotation_file <- "/mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/databases/STAR/GRCh38/gencode.v49.chr_patch_hapl_scaff.annotation.gtf"
-
-txdb <- txdbmaker::makeTxDbFromGFF(Annotation_file, format = "gtf", organism = "Homo sapiens")
+# Create tx2gene from GTF file
+txdb <- txdbmaker::makeTxDbFromGFF(gtf_file, format = "gtf", organism = "Homo sapiens")
 
 k <- keys(txdb, keytype = "TXNAME")
 
@@ -32,7 +42,8 @@ colnames(tx2gene) <- c("tx_id", "gene_id")
 tx2gene$tx_id <- gsub("\\..*", "", tx2gene$tx_id)
 tx2gene$gene_id <- gsub("\\..*", "", tx2gene$gene_id)
 
-files <- file.path("/mnt/tank/scratch/ezaitseva/Neurodegeneration/EXTERNAL_MATURATION/salmon", meta_data$sampleid, "quant.sf")
+# Get paths to quant.sf files
+files <- file.path(work_dir, "salmon", meta_data$sampleid, "quant.sf")
 
 names(files) <- meta_data$sampleid
 
@@ -124,12 +135,30 @@ upset_downregulation <- upset(fromList(list.downregulation),
 upregulation <- Reduce(intersect, list.upregulation)
 downregulation <- Reduce(intersect, list.downregulation)
 
-up_path   <- snakemake@output[["up"]]
-down_path <- snakemake@output[["down"]]
+# Get output paths
+if (exists("snakemake")) {
+  up_path <- snakemake@output[["up"]]
+  down_path <- snakemake@output[["down"]]
+  pca_plot_path <- snakemake@output[["pca_plot"]]
+  pca_variance_path <- snakemake@output[["pca_variance"]]
+} else {
+  # Fallback if running outside Snakemake
+  output_dir <- file.path(work_dir, "dif_expression_results")
+  up_path <- file.path(output_dir, "upregulation_salmon.txt")
+  down_path <- file.path(output_dir, "downregulation_salmon.txt")
+  pca_plot_path <- file.path(output_dir, "PCA_plot_salmon.png")
+  pca_variance_path <- file.path(output_dir, "PCA_variance_salmon.png")
+}
 
+# Create output directory
 dir.create(dirname(up_path), recursive = TRUE, showWarnings = FALSE)
 
+# Save gene lists
 write(upregulation, file = up_path)
 write(downregulation, file = down_path)
+
+# Save PCA plots
+ggsave(filename = pca_plot_path, plot = PCA_vst_plot, width = 10, height = 8, dpi = 300)
+ggsave(filename = pca_variance_path, plot = prop_vst_plot, width = 10, height = 8, dpi = 300)
 
 
