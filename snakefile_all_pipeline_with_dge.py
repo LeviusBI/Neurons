@@ -208,7 +208,6 @@ rule fastp:
             --cut_window_size 4 \
             --cut_mean_quality 20 \
             --n_base_limit 0 \
-            --correction \
             --html {output.html} \
             2> {work_dir}/reports/fastp/{wildcards.sample}.log || exit 1
         """
