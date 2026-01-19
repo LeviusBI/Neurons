@@ -144,6 +144,6 @@ The container must:
 
 ## Authors
 
-- Lev
-- Katya
-- Ekaterina
+- Ekaterina Kulikova
+- Ekaterina Zaitseva
+- Lev Eidelman
