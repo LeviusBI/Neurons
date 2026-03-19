@@ -1,0 +1,585 @@
+---
+title: "PD_analysis"
+format: html
+server: shiny
+---
+
+```{r}
+#| include: false
+library(rtracklayer)
+library(org.Hs.eg.db)
+library(fgsea)
+library(msigdbr)
+library(STRINGdb)
+library(tibble)
+library(tximport)
+library(txdbmaker)
+library(DESeq2)
+library(ggdist)
+library(ggpubr)
+library(GSVA)
+library(readr)
+library(clusterProfiler)
+library(GseaVis)
+library(RColorBrewer)
+library(GenomicFeatures)
+library(GenomeInfoDbData)
+library(ggplot2)
+library(factoextra)
+library(UpSetR)
+library(dplyr)
+library(stringr)
+library(DT)
+library(downloadthis)
+library(ReactomePA)
+library(viridis)
+library(stringr)
+library(ggrepel)
+library(DT)
+```
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+meta_data <- read.table("data/metadata_PD.tsv",
+                        header = TRUE,
+                        sep = "\t",
+                        stringsAsFactors = FALSE)
+
+meta_data <- meta_data %>%
+  rename(
+    sampleid   = ID,
+    diff_method = Ergicity,
+    diagnosis  = Health.PD,
+    individual = Pub.name,
+    batch      = Cells.Msc.SPb
+  )
+
+meta_data$diagnosis   <- ifelse(meta_data$diagnosis == "H", "control", "PD")
+
+meta_data$diagnosis   <- factor(meta_data$diagnosis)
+meta_data$diff_method <- factor(meta_data$diff_method)
+meta_data$individual  <- factor(meta_data$individual)
+meta_data$batch       <- factor(meta_data$batch)
+
+meta_data$diagnosis <- relevel(meta_data$diagnosis, ref = "control")
+
+
+```
+
+# Импортирование данных по квантификации Salmon
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+datatable(meta_data, 
+          caption = "Table 1. Metadata.",
+          style = "bootstrap5", 
+          extensions = 'Buttons', 
+          options = list(dom = 'lBfrtip', 
+              buttons = c('csv', 'excel')))
+```
+
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+files <- file.path("data/salmon", meta_data$sampleid, "quant.sf")
+names(files) <- meta_data$sampleid
+```
+
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+# Annotation
+gtf <- import("data/gencode.v49.chr_patch_hapl_scaff.annotation.gtf")
+```
+
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+gtf_df <- as.data.frame(gtf)
+
+tx2gene <- unique(
+  gtf_df[gtf_df$type == "transcript",
+         c("transcript_id", "gene_id")]
+)
+
+colnames(tx2gene) <- c("TXNAME", "GENEID")
+
+# Get rid of version
+tx2gene$TXNAME <- sub("\\..*", "", tx2gene$TXNAME)
+```
+
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+
+# Import Salmon data
+txi <- tximport(files,
+                type = "salmon",
+                tx2gene = tx2gene,
+                ignoreTxVersion = TRUE,
+                ignoreAfterBar = TRUE)
+```
+
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+
+# DESeq object
+dds <- DESeqDataSetFromTximport(
+  txi,
+  colData = meta_data,
+  design = ~ batch + diff_method + diagnosis
+)
+
+
+# Filter low expression
+keep <- rowSums(counts(dds) >= 10) > ncol(dds)*0.9
+dds <- dds[keep,]
+
+```
+
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+count.table <- assay(dds)
+
+datatable(count.table, 
+          caption = "Table 2. Count table.",
+          style = "bootstrap5", 
+          extensions = 'Buttons', 
+          options = list(dom = 'lBfrtip', 
+              buttons = c('csv', 'excel')))
+```
+
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+dds <- DESeq(dds)
+
+res <- results(dds, name = "diagnosis_PD_vs_control")
+
+res_df <- as.data.frame(res)
+res_df$gene_id <- rownames(res_df)
+
+# Remove version ENSG
+res_df$gene_id <- sub("\\..*", "", res_df$gene_id)
+
+res_df <- res_df[!is.na(res_df$padj), ]
+res_df <- res_df[order(res_df$padj), ]
+```
+
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+write.csv(res_df, "DESeq2_full_results.csv", row.names = FALSE)
+```
+
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+# Gene ranking for GSEA
+gene_ranks <- res_df$log2FoldChange
+names(gene_ranks) <- res_df$gene_id
+
+# remove NA
+gene_ranks <- gene_ranks[!is.na(gene_ranks)]
+
+# remove gene duplicates
+gene_ranks <- gene_ranks[!duplicated(names(gene_ranks))]
+
+gene_ranks <- sort(gene_ranks, decreasing = TRUE)
+```
+
+
+# Запуск DESeq2 анализа дифференциальной экспрессии
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+datatable(res_df, 
+          caption = "Table 3. DESeq2 results.",
+          style = "bootstrap5", 
+          extensions = 'Buttons', 
+          options = list(dom = 'lBfrtip', 
+              buttons = c('csv', 'excel')))
+```
+
+
+# Анализ главных компонент
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+vsd <- vst(dds, blind = F)
+vsd <- assay(vsd)
+
+PCA_vst <- prcomp(t(vsd))
+PCA_vst.points <- as.data.frame(PCA_vst$x)
+PCA_vst.points <- merge(meta_data, cbind(rownames(PCA_vst.points), PCA_vst.points), by = 1)
+
+PCA_plot <- ggplot(PCA_vst.points, aes(PC1, PC2, col = diff_method, shape = diagnosis))+
+    geom_point(size = 2.75)+
+    # geom_text(size = 3)+
+    theme_bw()+
+    theme(legend.position = "right")+
+    scale_color_brewer(palette = "Set1")+
+    xlab("PC1")+
+    ylab("PC2")
+
+prop_plot <- fviz_eig(PCA_vst, col.var="blue") + ggtitle("Proportion of variance")
+```
+
+```{r fig.height=4, fig.width=5.5}
+#| echo: false
+#| message: false
+#| warning: false
+download_this(
+  PCA_plot,
+  output_name = "PCA_plot",
+  output_extension = ".pdf",
+  button_label = "PDF",
+  button_type = "primary"
+)
+```
+
+
+```{r fig.height=4, fig.width=5.5}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: Figure 1. PCA visualization using regularized log transformation counts.
+PCA_plot
+```
+
+
+```{r fig.height=4, fig.width=5.5}
+#| echo: false
+#| message: false
+#| warning: false
+download_this(
+  prop_plot,
+  output_name = "prop_plot",
+  output_extension = ".pdf",
+  button_label = "PDF",
+  button_type = "primary"
+)
+```
+
+
+```{r fig.height=4, fig.width=5.5}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: Figure 2. The proportion of explained variance of each component.
+prop_plot
+```
+
+
+# Volcano plot
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+res_df <- res_df %>%
+  mutate(
+    significance = case_when(
+      padj < 0.05 & abs(log2FoldChange) > 1 ~ "p-value and log2 FC",
+      padj < 0.05 ~ "p-value",
+      abs(log2FoldChange) > 1 ~ "Log2 FC",
+      TRUE ~ "NS"
+    )
+  )
+
+volcano_plot <- ggplot(res_df,
+       aes(x = log2FoldChange,
+           y = -log10(padj),
+           color = significance)) +
+
+  geom_point(alpha = 0.7, size = 2) +
+
+  scale_color_manual(values = c(
+    "NS" = "grey70",
+    "Log2 FC" = "green3",
+    "p-value" = "royalblue",
+    "p-value and log2 FC" = "red"
+  )) +
+
+  geom_vline(xintercept = c(-1,1),
+             linetype="dashed") +
+
+  geom_hline(yintercept = -log10(0.05),
+             linetype="dashed") +
+
+  geom_text_repel(
+      data = subset(res_df, padj < 1e-5 | abs(log2FoldChange) > 3),
+      aes(label = gene_id),
+      size = 3,
+      max.overlaps = 20
+  ) +
+
+  labs(
+    title = "PD vs Control",
+    subtitle = "Volcano plot",
+    x = "Log2 fold change",
+    y = expression(-Log[10]~P)
+  ) +
+
+  theme_minimal(base_size = 14) +
+
+  theme(
+    plot.title = element_text(face="bold"),
+    legend.title = element_blank()
+  )
+```
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+pdf("Volcano_plot_PD_vs_Control.pdf", width=8, height=6)
+print(volcano_plot)
+dev.off()
+```
+
+
+```{r fig.height=6, fig.width=8}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: Figure 3. Volcano plot.
+volcano_plot
+```
+
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+# Upload gene signatures
+precursor_genes <- scan(
+  "data/downregulation.txt",
+  what = "",
+  quiet = TRUE
+)
+
+mature_genes <- scan(
+  "data/upregulation.txt",
+  what = "",
+  quiet = TRUE
+)
+
+gene_sets <- list(
+  Neural_precursors = precursor_genes,
+  Mature_neurons = mature_genes
+)
+```
+
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+# GSEA analysis
+gsea_res <- fgsea(
+  pathways = gene_sets,
+  stats = gene_ranks,
+  minSize = 10,
+  maxSize = 500,
+  nperm = 10000
+)
+
+gsea_res_df <- as.data.frame(gsea_res)
+
+gsea_res_df$leadingEdge <- sapply(
+  gsea_res_df$leadingEdge,
+  paste,
+  collapse = ";"
+)
+
+write.csv(
+  gsea_res_df,
+  "GSEA_neuron_signatures.csv",
+  row.names = FALSE
+)
+```
+
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+datatable(
+  gsea_res_df,
+  caption = "Table 6. GSEA enrichment of neuronal signatures.",
+  style = "bootstrap5",
+  extensions = 'Buttons',
+  options = list(
+    dom = 'lBfrtip',
+    buttons = c('csv','excel')
+  )
+)
+```
+
+
+# GSEA enrichment plots
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+gsea_precursor_plot <- plotEnrichment(
+  gene_sets$Neural_precursors,
+  gene_ranks
+) +
+  labs(title = "Neural precursor signature enrichment")
+
+gsea_mature_plot <- plotEnrichment(
+  gene_sets$Mature_neurons,
+  gene_ranks
+) +
+  labs(title = "Mature neuron signature enrichment")
+```
+
+
+```{r}
+#| fig-height: 4
+#| fig-width: 6
+#| echo: false
+#| fig-cap: Figure 4. GSEA enrichment for neural precursor signature.
+gsea_precursor_plot
+```
+
+
+```{r}
+#| fig-height: 4
+#| fig-width: 6
+#| echo: false
+#| fig-cap: Figure 5. GSEA enrichment for mature neuron signature.
+gsea_mature_plot
+```
+
+
+
+# DEGs
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+padj_cutoff <- 0.05
+lfc_cutoff  <- 1
+
+up_disease <- res_df %>%
+  filter(padj < padj_cutoff & log2FoldChange > lfc_cutoff)
+
+down_disease <- res_df %>%
+  filter(padj < padj_cutoff & log2FoldChange < -lfc_cutoff)
+
+up_control <- down_disease
+down_control <- up_disease
+
+write.csv(up_disease,   "DEG_up_in_disease.csv",   row.names=FALSE)
+write.csv(down_disease, "DEG_down_in_disease.csv", row.names=FALSE)
+write.csv(up_control,   "DEG_up_in_control.csv",   row.names=FALSE)
+write.csv(down_control, "DEG_down_in_control.csv", row.names=FALSE)
+
+# Save gene ID lists
+write.table(up_disease$gene_id,
+            "DEG_up_in_disease_geneIDs.txt",
+            row.names=FALSE, col.names=FALSE, quote=FALSE)
+
+write.table(down_disease$gene_id,
+            "DEG_down_in_disease_geneIDs.txt",
+            row.names=FALSE, col.names=FALSE, quote=FALSE)
+```
+
+# Consistent DEG up-regulated in SCA17
+```{r}
+#| echo: false
+df.up <- read.table(
+  "data/up_disease/enrichment_results_wg_result1772644621.txt",
+  header = TRUE,
+  sep = "\t",
+  stringsAsFactors = FALSE,
+  fill = TRUE,
+  quote = "")
+
+datatable(
+  df.up,
+  caption = "Table 4. Consistent DEG up-regulated in PD.",
+  style = "bootstrap5",
+  extensions = 'Buttons',
+  options = list(
+    dom = 'lBfrtip',
+    buttons = c('csv','excel')
+  )
+)
+```
+
+
+# Consistent DEG down-regulated in SCA17
+```{r}
+#| echo: false
+df.up <- read.table(
+  "data/down_disease/enrichment_results_wg_result1772644983.txt",
+  header = TRUE,
+  sep = "\t",
+  stringsAsFactors = FALSE,
+  fill = TRUE,
+  quote = "")
+
+datatable(
+  df.up,
+  caption = "Table 5. Consistent DEG down-regulated in PD.",
+  style = "bootstrap5",
+  extensions = 'Buttons',
+  options = list(
+    dom = 'lBfrtip',
+    buttons = c('csv','excel')
+  )
+)
+```
+
+
+# Enrichment analysis
+[Figure 6](data/enrichment_up.svg)
+
+![Figure 6. Enriched Reactome pathways for SCA17 linked DEGs up-regulated.](data/enrichment_up.svg)
+
+
+# STRING analysis
+[Figure 7 - STRING website](https://string-db.org/cgi/network?taskId=bQzdX6OcILCW&sessionId=bJpKvI8g9R1r)
+
+![Figure 7. STRING protein interaction network of SCA17 linked DEGs up-regulated.](data/string_up.png)
+
+
+# Enrichment analysis
+[Figure 8](data/enrichment_down.svg)
+
+![Figure 8. Enriched Reactome pathways for SCA17 linked DEGs down-regulated.](data/enrichment_down.svg)
+
+
+# STRING analysis
+[Figure 9 - STRING website](https://string-db.org/cgi/network?taskId=bkcYDSR0EtqO&sessionId=bJpKvI8g9R1r)
+
+![Figure 9. STRING protein interaction network of SCA17 linked DEGs down-regulated.](data/string_down.png)
